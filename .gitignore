@@ -1,0 +1,46 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+
+# Virtualenv
+.env
+.venv/
+venv/
+ENV/
+
+# Django
+*.log
+*.pot
+*.pyc
+db.sqlite3
+media/
+staticfiles/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info/
+.eggs/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# git
+.git/
