@@ -171,6 +171,9 @@ class CutBar(TimestampedModel):
     )
     # Group key this bar belongs to in the diagram (Extrusion|Style|Colour)
     group_key = models.CharField(max_length=200, blank=True)
+    is_flipped = models.BooleanField(
+        default=False, help_text="Operator has placed this bar on the machine"
+    )
 
     class Meta:
         ordering = ["design", "bar_no"]
@@ -178,6 +181,13 @@ class CutBar(TimestampedModel):
 
     def __str__(self):
         return f"Bar {self.bar_no} — {self.stock_len_mm}mm ({self.offcut_mm}mm offcut)"
+
+    @property
+    def is_complete(self):
+        lines = list(self.cut_lines.all())
+        if not lines:
+            return False
+        return all(bool(c.is_cut) for c in lines)
 
     @property
     def cuts(self):
@@ -199,6 +209,7 @@ class CutBarCut(TimestampedModel):
     position_mm = models.DecimalField(max_digits=10, decimal_places=2)
     length_mm = models.DecimalField(max_digits=10, decimal_places=2)
     item_id = models.PositiveIntegerField(default=0)  # drawing/item reference
+    is_cut = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["bar", "position_mm"]

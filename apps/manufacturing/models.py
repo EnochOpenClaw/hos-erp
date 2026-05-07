@@ -36,6 +36,8 @@ class Job(TimestampedModel):
     )
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    # Lower number = higher priority. 0 = normal FIFO, 1+ = urgent.
+    priority = models.PositiveIntegerField(default=0, db_index=True)
     # Once all control sheets are final and payment received → ready
 
     # Linked cut design (created after optimization)
@@ -47,7 +49,7 @@ class Job(TimestampedModel):
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ["priority", "created_at"]
 
     def __str__(self):
         return f"{self.job_number} — {self.status}"
