@@ -13,6 +13,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.core.models import Division, BinLocation
+from apps.reports.cutting_diagram import generate_cutting_diagram_pdf
 from .models import CutDesign, CutRequirement, CutBar, CutBarCut, Offcut, OffcutStatus
 from .serializers import (
     CutDesignSerializer, CutDesignListSerializer,
@@ -420,6 +421,26 @@ class CutDesignViewSet(viewsets.ModelViewSet):
             )
 
         return _run_optimize(design)
+
+    @action(detail=True, methods=["get"])
+    def cutting_diagram_pdf(self, request, pk=None):
+        """
+        GET /cutting/designs/{id}/cutting_diagram_pdf/
+        Returns the cutting diagram as a PDF.
+        """
+        design: CutDesign = self.get_object()
+        if design.status != "optimized" or not design.bar_plan_json:
+            return Response(
+                {"error": "Design has not been optimized yet. "
+                          "POST /designs/{id}/optimize/ first."},
+                status=400,
+            )
+        pdf_bytes = generate_cutting_diagram_pdf(design)
+        from django.http import HttpResponse
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        filename = f"CuttingDiagram_{design.job_no or design.id}.pdf"
+        response["Content-Disposition"] = f"inline; filename={filename}"
+        return response
 
 
 def _run_optimize(design: CutDesign) -> Response:
