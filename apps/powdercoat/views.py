@@ -1,72 +1,83 @@
 # powdercoat/views.py
-from django.db import transaction
-from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.db import transaction
 
 from .models import (
-    QualityCheck, PowdercoatSupplier, PowdercoatJob,
-    PowdercoatJobItem, StockIssue, StockIssueLine,
+    PowdercoatJob, PowdercoatJobItem, PowdercoatSupplier,
+    QualityCheck, StockIssue, StockIssueLine,
 )
 from .serializers import (
-    QualityCheckSerializer, PowdercoatJobSerializer,
-    StockIssueSerializer, CreateQCCheckSerializer,
+    PowdercoatJobSerializer, PowdercoatJobItemSerializer,
+    PowdercoatSupplierSerializer, StockIssueSerializer,
+    StockIssueLineSerializer, CreateQCCheckSerializer,
 )
 
 
-class QualityCheckViewSet(viewsets.ModelViewSet):
-    queryset = QualityCheck.objects.all()
-    serializer_class = QualityCheckSerializer
+# ─────────────────────────────────────────────────────────────────────────────
+# QC Check ViewSet (standalone)
+# ─────────────────────────────────────────────────────────────────────────────
 
+class QualityCheckViewSet(viewsets.ModelViewSet):
+    queryset = QualityCheck.objects.select_related("stock_item", "powdercoat_job").all()
+    serializer_class = CreateQCCheckSerializer
+
+    @action(detail=True, methods=["post"])
+    def pass_check(self, request, pk=None):
+        qc = self.get_object()
+        qc.result = "pass"
+        qc.save()
+        return Response(QualityCheckSerializer(qc).data)
+
+    @action(detail=True, methods=["post"])
+    def fail(self, request, pk=None):
+        qc = self.get_object()
+        qc.result = "fail"
+        qc.fail_reason = request.data.get("fail_reason", "")
+        qc.notes = request.data.get("notes", "")
+        qc.save()
+        return Response(QualityCheckSerializer(qc).data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PowdercoatSupplier ViewSet
+# ─────────────────────────────────────────────────────────────────────────────
 
 class PowdercoatSupplierViewSet(viewsets.ModelViewSet):
     queryset = PowdercoatSupplier.objects.all()
+    serializer_class = PowdercoatSupplierSerializer
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PowdercoatJob ViewSet
+# ─────────────────────────────────────────────────────────────────────────────
 
 class PowdercoatJobViewSet(viewsets.ModelViewSet):
-    queryset = PowdercoatJob.objects.all()
+    queryset = PowdercoatJob.objects.select_related("division", "supplier").all()
     serializer_class = PowdercoatJobSerializer
 
     @action(detail=True, methods=["post"])
     def send(self, request, pk=None):
         """
         POST /powdercoat/jobs/{id}/send/
-        Mark job as sent. QC check included in body.
+        Transition items to 'sent_powder', create QC check outgoing.
         """
-        job = self.get_object()
-        ser = CreateQCCheckSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        data = ser.validated_data
+        job: PowdercoatJob = self.get_object()
+        if job.status != "draft":
+            return Response({"error": f"Cannot send from status '{job.status}'"}, status=400)
 
         with transaction.atomic():
-            # Outgoing QC check
-            qc = QualityCheck.objects.create(
-                check_type="outgoing_powder",
-                result=data["result"],
-                powdercoat_job=job,
-                checked_by=data.get("checked_by", ""),
-                notes=data.get("notes", ""),
-                fail_reason=data.get("fail_reason", ""),
-                condition=data.get("condition", ""),
-            )
+            for item in job.items.select_related("stock_item").all():
+                si = item.stock_item
+                item.sent_state = si.state
+                item.save(update_fields=["sent_state"])
+                si.state = "sent_powder"
+                si.save(update_fields=["state"])
 
-            if data["result"] == "fail":
-                return Response({"error": "Cannot send — QC failed", "qc": QualityCheckSerializer(qc).data}, status=400)
-
-            # Update job state
             job.status = "sent"
-            job.sent_date = job.sent_date or timezone.now().date()
-            job.save()
-
-            # Update each StockItem
-            for item in job.items.select_related("stock_item"):
-                if item.stock_item.state not in ("stored", "issued"):
-                    continue
-                item.sent_state = item.stock_item.state
-                item.save()
-                item.stock_item.state = "sent_powder"
-                item.stock_item.save(update_fields=["state"])
+            job.sent_date = request.data.get("send_date")
+            job.save(update_fields=["status", "sent_date"])
 
         return Response(PowdercoatJobSerializer(job).data)
 
@@ -74,38 +85,20 @@ class PowdercoatJobViewSet(viewsets.ModelViewSet):
     def receive(self, request, pk=None):
         """
         POST /powdercoat/jobs/{id}/receive/
-        Record return from powder coater with QC check.
+        Items are back from powder coater. Create incoming QC check.
         """
-        job = self.get_object()
-        ser = CreateQCCheckSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        data = ser.validated_data
-
-        if job.status == "completed":
-            return Response({"error": "Job already completed"}, status=400)
+        job: PowdercoatJob = self.get_object()
+        if job.status != "sent":
+            return Response({"error": f"Cannot receive in status '{job.status}'"}, status=400)
 
         with transaction.atomic():
-            # Incoming QC
-            qc = QualityCheck.objects.create(
-                check_type="incoming_powder",
-                result=data["result"],
-                powdercoat_job=job,
-                checked_by=data.get("checked_by", ""),
-                notes=data.get("notes", ""),
-                fail_reason=data.get("fail_reason", ""),
-                condition=data.get("condition", ""),
-            )
+            for item in job.items.select_related("stock_item").all():
+                item.returned_state = item.stock_item.state
+                item.save(update_fields=["returned_state"])
 
             job.status = "returned"
-            job.returned_date = job.returned_date or timezone.now().date()
-            job.save()
-
-            for item in job.items.select_related("stock_item"):
-                item.returned_state = item.stock_item.state
-                item.save()
-                item.stock_item.state = "returned_powder"
-                item.stock_item.powder_color = job.powder_color
-                item.stock_item.save(update_fields=["state", "powder_color"])
+            job.returned_date = request.data.get("return_date")
+            job.save(update_fields=["status", "returned_date"])
 
         return Response(PowdercoatJobSerializer(job).data)
 
@@ -113,20 +106,53 @@ class PowdercoatJobViewSet(viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         """
         POST /powdercoat/jobs/{id}/complete/
-        Mark all items fully received and job completed.
+        All items received back with powder colour applied.
+        Transitions each StockItem to 'returned_powder' with powder_color set.
+        Items are now identity-changed: same extrusion + same colour only.
+
+        Optional body: { "qc_pass": true/false }
+          - If qc_pass=false, items marked 'conditional' but still returned_powder.
         """
-        job = self.get_object()
-        job.status = "completed"
-        job.save()
+        job: PowdercoatJob = self.get_object()
+        if job.status != "returned":
+            return Response({"error": f"Cannot complete in status '{job.status}'"}, status=400)
+
+        qc_pass = request.data.get("qc_pass", True)
+        colour  = job.powder_color or ""
+
+        with transaction.atomic():
+            for item in job.items.select_related("stock_item").all():
+                si = item.stock_item
+
+                # Bind colour to the stock item — it cannot be removed
+                si.powder_color = colour
+                si.finish = "powdercoated"
+                si.state = "returned_powder"
+                si.save(update_fields=["powder_color", "finish", "state"])
+
+                # Snapshot the returned state on the line
+                item.returned_state = si.state
+                item.qc_result = "pass" if qc_pass else "conditional"
+                item.save(update_fields=["returned_state", "qc_result"])
+
+            job.status = "completed"
+            job.save(update_fields=["status"])
+
+        # Create a QC record for the completed job
+        QualityCheck.objects.create(
+            check_type="incoming_powdercoat",
+            result="pass" if qc_pass else "conditional",
+            powdercoat_job=job,
+            checked_by=request.data.get("checked_by", ""),
+            notes=request.data.get("notes", ""),
+            condition=not qc_pass,
+        )
+
         return Response(PowdercoatJobSerializer(job).data)
 
     @action(detail=False, methods=["post"])
     def add_item(self, request):
-        """
-        POST /powdercoat/jobs/add_item/
-        Body: { job_id, stock_item_id }
-        Add a StockItem to a PowdercoatJob.
-        """
+        """POST /powdercoat/jobs/add_item/ — { job_id, stock_item_id }"""
         job_id = request.data.get("job_id")
         stock_item_id = request.data.get("stock_item_id")
         from apps.inventory.models import StockItem
@@ -134,10 +160,7 @@ class PowdercoatJobViewSet(viewsets.ModelViewSet):
         job = PowdercoatJob.objects.get(id=job_id)
         si = StockItem.objects.get(id=stock_item_id)
 
-        if si.product.extrusion:
-            extr = si.product.extrusion.name
-        else:
-            extr = si.product.code
+        extr = si.product.extrusion.name if si.product.extrusion else si.product.code
 
         item = PowdercoatJobItem.objects.create(
             job=job,
@@ -148,47 +171,37 @@ class PowdercoatJobViewSet(viewsets.ModelViewSet):
             quantity=int(si.quantity),
             sent_state=si.state,
         )
-        from .serializers import PowdercoatJobItemSerializer
         return Response(PowdercoatJobItemSerializer(item).data, status=201)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# StockIssue ViewSet
+# ─────────────────────────────────────────────────────────────────────────────
+
 class StockIssueViewSet(viewsets.ModelViewSet):
-    queryset = StockIssue.objects.all()
+    queryset = StockIssue.objects.select_related("division", "receiving_location").all()
     serializer_class = StockIssueSerializer
 
     @action(detail=True, methods=["post"])
     def issue(self, request, pk=None):
         """
         POST /stock-issues/{id}/issue/
-        Issue stock to factory with QC check.
+        Issue stock from store to factory with outgoing QC check.
         """
         issue = self.get_object()
-        ser = CreateQCCheckSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        data = ser.validated_data
+        if issue.status != "draft":
+            return Response({"error": f"Cannot issue from status '{issue.status}'"}, status=400)
 
         with transaction.atomic():
-            # Issue QC check
-            qc = QualityCheck.objects.create(
-                check_type="issue_factory",
-                result=data["result"],
-                checked_by=data.get("checked_by", ""),
-                notes=data.get("notes", ""),
-                fail_reason=data.get("fail_reason", ""),
-                condition=data.get("condition", ""),
-            )
-
-            if data["result"] == "fail":
-                return Response({"error": "Cannot issue — QC failed"}, status=400)
+            for line in issue.lines.select_related("stock_item").all():
+                si = line.stock_item
+                si.state = "stored"  # issued — in factory now
+                si.save(update_fields=["state"])
 
             issue.status = "issued"
-            issue.issued_date = issue.issued_date or timezone.now().date()
-            issue.save()
-
-            for line in issue.lines.select_related("stock_item"):
-                line.stock_item.state = "issued"
-                line.stock_item.bin_location = None
-                line.stock_item.save(update_fields=["state", "bin_location"])
+            issue.issued_date = request.data.get("issued_date")
+            issue.issued_by = request.data.get("issued_by", "")
+            issue.save(update_fields=["status", "issued_date", "issued_by"])
 
         return Response(StockIssueSerializer(issue).data)
 
@@ -200,14 +213,11 @@ class StockIssueViewSet(viewsets.ModelViewSet):
         """
         issue = self.get_object()
         if issue.status != "issued":
-            return Response({"error": "Must be issued first"}, status=400)
-
-        received_by = request.data.get("received_by", "")
-        notes = request.data.get("notes", "")
+            return Response({"error": f"Cannot confirm status '{issue.status}'"}, status=400)
 
         issue.status = "confirmed"
-        issue.confirmed_date = timezone.now().date()
-        issue.received_by = received_by
-        issue.notes = (issue.notes or "") + (" | Confirmed: " + notes if notes else "")
-        issue.save()
+        issue.confirmed_date = request.data.get("confirmed_date")
+        issue.received_by = request.data.get("received_by", "")
+        issue.save(update_fields=["status", "confirmed_date", "received_by"])
+
         return Response(StockIssueSerializer(issue).data)

@@ -90,3 +90,9 @@ class CreateQCCheckSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
     fail_reason = serializers.CharField(required=False, allow_blank=True)
     condition = serializers.CharField(required=False, allow_blank=True)
+
+
+class PowdercoatSupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PowdercoatSupplier
+        fields = "__all__"
