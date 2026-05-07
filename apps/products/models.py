@@ -73,6 +73,10 @@ class Product(TimestampedModel):
         ExtrusionType, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="products"
     )
+    # Finish / colour attributes — blank means "from price list / unspecified"
+    style = models.CharField(max_length=50, blank=True)
+    colour = models.CharField(max_length=100, blank=True)
+    colour_code = models.CharField(max_length=30, blank=True)
     description = models.TextField(blank=True)
     unit_type = models.CharField(max_length=20, choices=[
         ("BAR", "Bar (length)"),
