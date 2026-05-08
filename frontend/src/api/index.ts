@@ -1,8 +1,8 @@
 import axios from 'axios'
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: '/api',
-  withCredentials: true,  // send session cookies
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -19,4 +19,5 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-export default api
+export type { PaginatedResponse } from './resources'
+export * from './resources'

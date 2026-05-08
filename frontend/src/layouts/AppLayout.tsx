@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Typography, theme } from 'antd'
+import { Layout as AntLayout, Menu, Typography, theme } from 'antd'
 import {
   DashboardOutlined,
   AppstoreOutlined,
@@ -9,7 +9,7 @@ import {
   ShoppingCartOutlined,
 } from '@ant-design/icons'
 
-const { Sider, Content } = Layout
+const { Sider, Content } = AntLayout
 const { Title } = Typography
 
 const menuItems = [
@@ -20,7 +20,7 @@ const menuItems = [
   { key: '/sales', icon: <ShoppingCartOutlined />, label: 'Sales' },
 ]
 
-export function Layout() {
+export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -29,7 +29,7 @@ export function Layout() {
   const selectedKey = '/' + location.pathname.split('/')[1]
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <AntLayout style={{ minHeight: '100vh' }}>
       <Sider
         collapsible
         collapsed={collapsed}
@@ -65,7 +65,7 @@ export function Layout() {
         />
       </Sider>
 
-      <Layout>
+      <AntLayout>
         <Content
           style={{
             padding: 24,
@@ -75,7 +75,7 @@ export function Layout() {
         >
           <Outlet />
         </Content>
-      </Layout>
-    </Layout>
+      </AntLayout>
+    </AntLayout>
   )
 }
