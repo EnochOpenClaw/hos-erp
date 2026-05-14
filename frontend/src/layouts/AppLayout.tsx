@@ -13,11 +13,12 @@ const { Sider, Content } = AntLayout
 const { Title } = Typography
 
 const menuItems = [
-  { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-  { key: '/products', icon: <AppstoreOutlined />, label: 'Products' },
-  { key: '/inventory', icon: <InboxOutlined />, label: 'Inventory' },
-  { key: '/manufacturing', icon: <ToolOutlined />, label: 'Manufacturing' },
-  { key: '/sales', icon: <ShoppingCartOutlined />, label: 'Sales' },
+  { key: '/dashboard',  icon: <DashboardOutlined />,  label: 'Dashboard' },
+  { key: '/products',  icon: <AppstoreOutlined />,  label: 'Products' },
+  { key: '/inventory',  icon: <InboxOutlined />,     label: 'Inventory' },
+  { key: '/purchasing',icon: <ShoppingCartOutlined />, label: 'Purchasing' },
+  { key: '/manufacturing', icon: <ToolOutlined />,    label: 'Manufacturing' },
+  { key: '/sales',    icon: <ShoppingCartOutlined />, label: 'Sales' },
 ]
 
 export function AppLayout() {

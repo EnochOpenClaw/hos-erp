@@ -1,14 +1,18 @@
 # manufacturing/views.py
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.core.models import Company
 from .models import Job, ControlSheet, ControlSheetLine, CutRequirement, CutPlan
 from .serializers import (
-    JobSerializer, ControlSheetSerializer,
-    ControlSheetLineSerializer, GenerateCutRequirementsSerializer,
+    JobSerializer, JobListSerializer,
+    ControlSheetSerializer, ControlSheetLineSerializer,
+    CutRequirementSerializer,
+    GenerateCutRequirementsSerializer,
 )
 from apps.cutting.models import CutDesign, CutBar, CutBarCut
 from apps.cutting.views import _run_optimize
@@ -29,11 +33,9 @@ class IssueSheetPDFMixin:
         if design.status != "optimized":
             return Response({"error": "Cut design not yet optimized."}, status=400)
 
-        import datetime
-        year = datetime.date.today().year
+        year = timezone.now().year
         prefix = f"ISSUE-{year}-"
-        from apps.powdercoat.models import StockIssue
-        last = StockIssue.objects.filter(issue_number__startswith=prefix).order_by("issue_number").last()
+        last = StockIssue.objects.filter(issue_number__startswith=prefix).order_by("issue_number").last() if hasattr(__import__('apps.powdercoat', fromlist=['models']), 'StockIssue') else None
         seq = int(last.issue_number.split("-")[-1]) + 1 if last else 1
         issue_no = f"{prefix}{seq:04d}"
 
@@ -57,18 +59,37 @@ class IssueSheetPDFMixin:
 
 class JobViewSet(IssueSheetPDFMixin, viewsets.ModelViewSet):
     queryset = Job.objects.select_related("division", "cut_design").all()
-    serializer_class = JobSerializer
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return JobListSerializer
+        return JobSerializer
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["company"] = Company.objects.filter(name="OpenFactory Systems").first()
+        return ctx
+
+    def get_queryset(self):
+        qs = Job.objects.filter(company__name="OpenFactory Systems").select_related("division", "cut_design")
+        search = self.request.query_params.get("search")
+        if search:
+            qs = qs.filter(job_number__icontains=search, customer_name__icontains=search)
+        st = self.request.query_params.get("status")
+        if st:
+            qs = qs.filter(status=st)
+        div = self.request.query_params.get("division")
+        if div:
+            qs = qs.filter(division_id=div)
+        return qs
 
     @action(detail=True, methods=["post"])
     def generate_requirements(self, request, pk=None):
         """POST /manufacturing/jobs/{id}/generate_requirements/"""
         job = self.get_object()
-        ser = GenerateCutRequirementsSerializer(data=request.data)
+        ser = GenerateCutRequirementsSerializer(data=request.data, context={"job": job})
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
-
-        from apps.core.models import Division
-        division = Division.objects.get(id=data["division_id"])
 
         final_sheets = job.control_sheets.filter(status="final")
         if not final_sheets.exists():
@@ -87,9 +108,9 @@ class JobViewSet(IssueSheetPDFMixin, viewsets.ModelViewSet):
                     product=line.product,
                     cut_length_mm=length,
                     qty=line.quantity,
-                    style=getattr(line.product, "style", ""),
-                    colour=line.colour_name or getattr(line.product, "colour", ""),
-                    colour_code=line.colour_code or getattr(line.product, "colour_code", ""),
+                    style=line.product.style or "",
+                    colour=cs.colour_name or line.product.colour or "",
+                    colour_code=cs.colour_code or line.product.colour_code or "",
                     allow_offcut_match=True,
                 )
                 created += 1
@@ -105,19 +126,17 @@ class JobViewSet(IssueSheetPDFMixin, viewsets.ModelViewSet):
         if not job.cut_requirements.exists():
             return Response({"error": "No cut requirements."}, status=400)
 
-        cut_design, created = CutDesign.objects.get_or_create(
-            job=job,
-            defaults={
-                "division": job.division,
-                "name": f"{job.job_number} — Cut List",
-                "offcut_keep_min_mm": 150,
-                "status": "draft",
-            }
-        )
-        if not created:
-            cut_design.requirements.all().delete()
-            cut_design.bars.all().delete()
-            cut_design.offcuts.all().delete()
+        cut_design = CutDesign.objects.filter(manufacturing_jobs__id=job.id).first()
+        if not cut_design:
+            cut_design = CutDesign.objects.create(
+                division=job.division,
+                name=f"{job.job_number} — Cut List",
+                offcut_keep_min_mm=150,
+                status="draft",
+            )
+            # Wire the FK from Job side
+            job.cut_design = cut_design
+            job.save(update_fields=["cut_design"])
 
         for req in job.cut_requirements.select_related("product").all():
             cut_design.requirements.create(
@@ -143,6 +162,32 @@ class JobViewSet(IssueSheetPDFMixin, viewsets.ModelViewSet):
         job.save()
         return Response(JobSerializer(job).data)
 
+    @action(detail=True, methods=["post"])
+    def add_control_sheet(self, request, pk=None):
+        """POST /manufacturing/jobs/{id}/add_control_sheet/ — create a new blank sheet."""
+        job = self.get_object()
+        next_num = job.control_sheets.count() + 1
+        cs = ControlSheet.objects.create(
+            job=job,
+            sheet_number=next_num,
+            name=request.data.get("name", f"Opening {next_num}"),
+            opening_type=request.data.get("opening_type", "door"),
+            status="draft",
+        )
+        return Response(ControlSheetSerializer(cs).data)
+
+    @action(detail=True, methods=["post"])
+    def add_cut_requirement(self, request, pk=None):
+        """POST /manufacturing/jobs/{id}/add_cut_requirement/ — add a line to a job."""
+        job = self.get_object()
+        req = CutRequirement.objects.create(
+            job=job,
+            product_id=request.data["product_id"],
+            cut_length_mm=request.data["cut_length_mm"],
+            qty=request.data.get("qty", 1),
+        )
+        return Response(CutRequirementSerializer(req).data)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ControlSheet ViewSet
@@ -151,6 +196,18 @@ class JobViewSet(IssueSheetPDFMixin, viewsets.ModelViewSet):
 class ControlSheetViewSet(viewsets.ModelViewSet):
     queryset = ControlSheet.objects.select_related("job").all()
     serializer_class = ControlSheetSerializer
+
+    def get_queryset(self):
+        qs = ControlSheet.objects.filter(job__company__name="OpenFactory Systems")
+        job_id = self.request.query_params.get("job")
+        if job_id:
+            qs = qs.filter(job_id=job_id)
+        return qs
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["company"] = Company.objects.filter(name="OpenFactory Systems").first()
+        return ctx
 
     @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):
@@ -164,7 +221,6 @@ class ControlSheetViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def sign_off(self, request, pk=None):
-        from django.utils import timezone
         cs = self.get_object()
         cs.status = "final"
         cs.is_final = True
@@ -172,6 +228,36 @@ class ControlSheetViewSet(viewsets.ModelViewSet):
         cs.signed_off_at = timezone.now()
         cs.save()
         return Response(ControlSheetSerializer(cs).data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ControlSheetLine ViewSet
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ControlSheetLineViewSet(viewsets.ModelViewSet):
+    queryset = ControlSheetLine.objects.select_related("product", "control_sheet").all()
+    serializer_class = ControlSheetLineSerializer
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["company"] = Company.objects.filter(name="OpenFactory Systems").first()
+        return ctx
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CutRequirement ViewSet
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CutRequirementViewSet(viewsets.ModelViewSet):
+    queryset = CutRequirement.objects.select_related("product", "job").all()
+    serializer_class = CutRequirementSerializer
+
+    def get_queryset(self):
+        qs = CutRequirement.objects.filter(job__company__name="OpenFactory Systems")
+        job_id = self.request.query_params.get("job")
+        if job_id:
+            qs = qs.filter(job_id=job_id)
+        return qs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -254,7 +340,7 @@ class CuttingQueueViewSet(viewsets.ViewSet):
 
             if key not in sections:
                 sections[key] = {
-                    "heading":     f"{extr} – {colour} – {code}" + (f" - {stock}" if stock else ""),
+                    "heading":     f"{extr} – {colour} – {code}" + (f" — {stock}" if stock else ""),
                     "extrusion":   extr,
                     "colour":      colour,
                     "colour_code": code,

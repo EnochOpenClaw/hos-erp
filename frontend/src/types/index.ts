@@ -70,6 +70,7 @@ export interface MaterialCategory {
   description: string
   sort_order: number
   product_count: number
+  default_markup_pct: string
   created_at: string
   updated_at: string
 }
@@ -106,6 +107,9 @@ export interface Product {
   description: string
   unit_type: UnitType
   unit_type_display: string
+  unit_cost: string | null
+  selling_price: string | null
+  markup_override: string | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -166,10 +170,23 @@ export interface Supplier {
   phone: string
   address: string
   lead_time_days: number
+  payment_terms: string
+  contact_name: string
+  vat_number: string
+  account_number: string
+  account_name: string
+  account_email: string
+  registration_number: string
+  bank_name: string
+  bank_branch: string
+  bank_code: string
   is_active: boolean
   created_at: string
   updated_at: string
 }
+
+export type POPhase = 'requisition' | 'pending_approval' | 'approved' | 'ordered' | 'partial' | 'received' | 'cancelled'
+export type POReason = 'stock_reorder' | 'job_request' | 'special_order' | 'blanket' | 'other'
 
 export interface PurchaseOrder {
   id: string
@@ -178,9 +195,15 @@ export interface PurchaseOrder {
   division_code: string
   supplier: string
   supplier_name: string
-  status: string
+  phase: POPhase
+  reason: POReason | null
+  requires_quote: boolean
+  job: string | null
+  approved_by: string
+  approved_at: string | null
+  is_eft: boolean
   order_date: string
-  expected_date: string
+  expected_date: string | null
   notes: string
   lines: PurchaseOrderLine[]
   total_value: string
@@ -199,19 +222,109 @@ export interface PurchaseOrderLine {
   received_qty: number
   total: string
   is_complete: boolean
+  job: string | null
+  job_number: string | null
+}
+
+export interface PurchaseInvoice {
+  id: string
+  invoice_number: string
+  supplier_inv_number: string
+  po: string
+  po_number: string
+  grn: string
+  grn_number: string
+  supplier_name: string
+  invoice_date: string
+  due_date: string | null
+  subtotal: string
+  vat: string
+  total: string
+  status: 'draft' | 'posted' | 'discrepancy'
+  notes: string
+  price_variance_json: Record<string, { product: string; old_price: string; new_price: string; variance: string; variance_pct: string }>
+  posted_by: string
+  posted_at: string | null
+  lines: PurchaseInvoiceLine[]
+}
+
+export interface PurchaseInvoiceLine {
+  id: string
+  po_line: string
+  product_code: string
+  product_name: string
+  po_line_ordered: number
+  invoiced_qty: number
+  po_unit_price: string
+  unit_price: string
+  price_variance: string
+  variance_pct: string
+  line_total: string
+  notes: string
 }
 
 // ─── Manufacturing ───────────────────────────────────────────────────────────
+
+export type JobStatus = 'draft' | 'confirmed' | 'ready' | 'cutting' | 'completed' | 'cancelled'
 
 export interface Job {
   id: string
   job_number: string
   division: string
-  status: string
+  division_code: string
+  description: string
+  customer_name: string
+  customer_ref: string
+  status: JobStatus
   priority: number
-  source_order: string
+  cut_design: string | null
+  cut_design_id: string | null
+  cut_design_status: string | null
+  notes: string
+  control_sheet_count: number
+  control_sheets: ControlSheet[]
   created_at: string
   updated_at: string
+}
+
+export interface ControlSheetLine {
+  id: string
+  product: string
+  product_code: string
+  product_name: string
+  length_mm: number | null
+  quantity: number
+  finish: string
+  powder_color: string
+  position: string
+  notes: string
+}
+
+export interface ControlSheet {
+  id: string
+  job: string
+  job_number: string
+  job_status: string
+  sheet_number: number
+  name: string
+  status: string
+  is_final: boolean
+  opening_type: string
+  width_mm: number | null
+  height_mm: number | null
+  lock_type: string
+  colour_name: string
+  colour_code: string
+  powder_coat: boolean
+  mesh_type: string
+  has_top_rail: boolean
+  has_bottom_rail: boolean
+  rail_width_mm: number
+  hardware_notes: string
+  signed_off_by: string
+  signed_off_at: string | null
+  lines: ControlSheetLine[]
+  created_at: string
 }
 
 // ─── Powdercoat ───────────────────────────────────────────────────────────────

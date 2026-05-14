@@ -12,6 +12,9 @@ class MaterialCategory(TimestampedModel):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
     sort_order = models.PositiveIntegerField(default=0)
+    # Default markup % applied to products in this category when cost price updates
+    default_markup_pct = models.DecimalField(max_digits=5, decimal_places=2, default=30.00,
+                                             help_text="Default markup %% for products in this category")
 
     class Meta:
         ordering = ["sort_order", "name"]
@@ -84,10 +87,53 @@ class Product(TimestampedModel):
         ("EACH", "Each"),
         ("SET", "Set"),
     ], default="BAR")
+    # Costing — updated automatically when invoice is posted
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True,
+                                     help_text="Last purchase cost price per unit")
+    selling_price = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True,
+                                         help_text="Current selling price (auto or manual)")
+    # Markup override — if set, overrides category default for auto-price update
+    markup_override = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True,
+                                           help_text="Markup %% to apply instead of category default")
     is_active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["category__name", "name"]
+
+    @staticmethod
+    def generate_code(category, extrusion, colour_code, style):
+        """
+        Auto-generate product code from selected fields.
+        Format: CAT-EXTR-COL
+          CAT   = first 3 chars of category name, uppercase
+          EXTR  = first 4 meaningful chars of extrusion name
+          COL   = colour_code or style[0:2] or 'NC'
+        """
+        parts = []
+
+        if category:
+            parts.append(category.name.upper()[:3])
+        else:
+            parts.append('GEN')
+
+        strip_words = {'type','profile','channel','track','stile','rail','louvre','slat','rod','bar'}
+        if extrusion:
+            name_words = extrusion.name.upper().split()
+            meaningful = [w for w in name_words if w.lower() not in strip_words]
+            ext_part = ''.join(w[:4] for w in (meaningful if meaningful else name_words))[:4]
+            parts.append(ext_part or 'UNK')
+        else:
+            parts.append('UNK')
+
+        col = (colour_code.upper()[:3] if colour_code else (style.upper()[:2] if style else 'NC'))
+        parts.append(col)
+
+        return '-'.join(parts)
+
+    def save(self, *args, **kwargs):
+        if not self.code or self.code.startswith('TMP'):
+            self.code = self.generate_code(self.category, self.extrusion, self.colour_code, self.style)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.code} — {self.name}"
