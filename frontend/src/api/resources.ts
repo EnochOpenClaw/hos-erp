@@ -83,6 +83,8 @@ export const purchaseOrders = {
     api.post<PurchaseOrder>('/purchasing/purchase-orders/', data),
   patch: (id: string, data: Partial<PurchaseOrder>) =>
     api.patch<PurchaseOrder>(`/purchasing/purchase-orders/${id}/`, data),
+  submitForApproval: (id: string) =>
+    api.post<{ phase: string; po_number: string }>(`/purchasing/purchase-orders/${id}/submit_for_approval/`),
   approve: (id: string, data: { approved_by: string; is_eft: boolean }) =>
     api.post<PurchaseOrder>(`/purchasing/purchase-orders/${id}/approve/`, data),
   send: (id: string) =>
@@ -179,4 +181,21 @@ export interface PaginatedResponse<T> {
   next: string | null
   previous: string | null
   results: T[]
+}
+
+// ─── Factory / Cutting Queue ─────────────────────────────────────────────
+
+export const factory = {
+  queue: (params?: Record<string, string>) =>
+    api.get<any[]>('/manufacturing/factory/', { params }),
+  job: (id: string) =>
+    api.get<any>(`/manufacturing/factory/${id}/`),
+  reorder: (job_ids: string[]) =>
+    api.post('/manufacturing/factory/reorder/', { job_ids }),
+  flipBar: (jobId: string, barId: string) =>
+    api.post(`/manufacturing/factory/${jobId}/flip_bar/${barId}/`),
+  markCut: (jobId: string, cutId: string) =>
+    api.post(`/manufacturing/factory/${jobId}/mark_cut/${cutId}/`),
+  resetBar: (jobId: string, barId: string) =>
+    api.post(`/manufacturing/factory/${jobId}/reset_bar/${barId}/`),
 }

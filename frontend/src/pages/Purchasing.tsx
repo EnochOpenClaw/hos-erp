@@ -165,6 +165,17 @@ export default function Purchasing() {
     },
   })
 
+  const submitForApprovalMutation = useMutation({
+    mutationFn: (id: string) => purchaseOrders.submitForApproval(id),
+    onSuccess: (res) => {
+      messageApi.success(`PO ${res.po_number} submitted for approval`)
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] })
+    },
+    onError: (err: any) => {
+      messageApi.error(err?.response?.data?.detail ?? 'Submit failed')
+    },
+  })
+
   const approvePOMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) =>
       purchaseOrders.approve(id, data),
@@ -930,11 +941,11 @@ export default function Purchasing() {
                 </Button>
               )}
               {viewPO.phase === 'requisition' && (
-                <Button onClick={() => {
-                  setViewPO(null)
-                  setApprovePO(viewPO)
-                  setApproveModalOpen(true)
-                }}>
+                <Button
+                  type="primary"
+                  onClick={() => submitForApprovalMutation.mutate(viewPO.id)}
+                  loading={submitForApprovalMutation.isPending}
+                >
                   Submit for Approval
                 </Button>
               )}
@@ -953,7 +964,7 @@ export default function Purchasing() {
                   Mark Received
                 </Button>
               )}
-              {viewPO.phase === 'ordered' && (
+              {(viewPO.phase === 'ordered' || viewPO.phase === 'partial') && (
                 <Button onClick={() => openInvoiceModal(viewPO)} icon={<FileTextOutlined />}>
                   Enter Invoice
                 </Button>

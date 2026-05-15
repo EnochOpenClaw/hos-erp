@@ -7,6 +7,7 @@ import {
   InboxOutlined,
   ToolOutlined,
   ShoppingCartOutlined,
+  ScissorOutlined,
 } from '@ant-design/icons'
 
 const { Sider, Content } = AntLayout
@@ -18,6 +19,7 @@ const menuItems = [
   { key: '/inventory',  icon: <InboxOutlined />,     label: 'Inventory' },
   { key: '/purchasing',icon: <ShoppingCartOutlined />, label: 'Purchasing' },
   { key: '/manufacturing', icon: <ToolOutlined />,    label: 'Manufacturing' },
+  { key: '/factory',       icon: <ScissorOutlined />, label: 'Factory Floor' },
   { key: '/sales',    icon: <ShoppingCartOutlined />, label: 'Sales' },
 ]
 

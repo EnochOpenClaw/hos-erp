@@ -181,19 +181,23 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseInvoice
-        fields = ["id", "invoice_number", "supplier_inv_number", "po", "po_number",
-                 "grn", "grn_number", "supplier_name",
-                 "invoice_date", "due_date", "subtotal", "vat", "total",
-                 "status", "notes", "price_variance_json", "posted_by", "posted_at",
-                 "lines"]
+        fields = ["id", 'invoice_number', 'supplier_inv_number', 'po', 'po_number',
+                 'grn_number', 'supplier_name',
+                 'invoice_date', 'due_date', 'subtotal', 'vat', 'total',
+                 'status', 'notes', 'price_variance_json', 'posted_by', 'posted_at',
+                 'lines']
 
     def get_supplier_name(self, obj):
         return obj.po.supplier.name
 
-    def create(self, validated_data):
+    def create(self, validated_data, grn_id=None):
         company = Company.objects.get(name="OpenFactory Systems")
         lines_data = validated_data.pop("lines", [])
-        invoice = PurchaseInvoice.objects.create(company=company, **validated_data)
+        grn_uuid = validated_data.pop("grn", grn_id)
+        grn = GoodsReceivedNote.objects.get(id=grn_uuid) if grn_uuid else None
+        invoice = PurchaseInvoice.objects.create(
+            company=company, grn=grn, **validated_data
+        )
         for line in lines_data:
             PurchaseInvoiceLine.objects.create(invoice=invoice, **line)
         return invoice
